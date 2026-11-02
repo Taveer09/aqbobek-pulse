@@ -1,0 +1,14 @@
+[
+  {"id":"weak-root","description":"Две низкие работы по корневой теме: высокий риск","values":{"root":[0.2,0.2]},"targets":[{"topicId":"root","weight":1}],"expectedLevel":"high","expectedScore":80},
+  {"id":"strong-root","description":"Две уверенные работы по корневой теме: низкий риск","values":{"root":[0.9,0.9]},"targets":[{"topicId":"root","weight":1}],"expectedLevel":"low","expectedScore":10},
+  {"id":"medium-boundary","description":"Освоение 60 процентов: граница среднего риска","values":{"root":[0.6,0.6]},"targets":[{"topicId":"root","weight":1}],"expectedLevel":"medium","expectedScore":40},
+  {"id":"high-boundary","description":"Освоение 35 процентов: граница высокого риска","values":{"root":[0.35,0.35]},"targets":[{"topicId":"root","weight":1}],"expectedLevel":"high","expectedScore":65},
+  {"id":"weak-dependent","description":"Слабая тема и слабая предпосылка","values":{"root":[0.1,0.1],"motion":[0.2,0.2]},"targets":[{"topicId":"motion","weight":1}],"expectedLevel":"high","expectedScore":83},
+  {"id":"unknown-prerequisite","description":"Есть наблюдения по теме, но нет наблюдений по существующей предпосылке","values":{"motion":[0.9,0.9]},"targets":[{"topicId":"motion","weight":1}],"expectedLevel":"insufficient_data","expectedScore":null},
+  {"id":"empty-history","description":"Не выдавать прогноз без работ","values":{},"targets":[{"topicId":"root","weight":1}],"expectedLevel":"insufficient_data","expectedScore":null},
+  {"id":"single-observation","description":"Одной работы недостаточно для оценки освоения","values":{"root":[0.1]},"targets":[{"topicId":"root","weight":1}],"expectedLevel":"insufficient_data","expectedScore":null},
+  {"id":"foundation-gap","description":"Освоение целевой темы среднее, слабая предпосылка повышает риск","values":{"root":[0.1,0.1],"motion":[0.6,0.6]},"targets":[{"topicId":"motion","weight":1}],"expectedLevel":"medium","expectedScore":55},
+  {"id":"weighted-topics","description":"В работе преобладает слабая тема: высокий риск","values":{"root":[0.2,0.2],"other":[0.9,0.9]},"targets":[{"topicId":"root","weight":0.8},{"topicId":"other","weight":0.2}],"expectedLevel":"high","expectedScore":66},
+  {"id":"balanced-topics","description":"Равные веса слабой и сильной темы: средний риск","values":{"root":[0.2,0.2],"other":[0.9,0.9]},"targets":[{"topicId":"root","weight":0.5},{"topicId":"other","weight":0.5}],"expectedLevel":"medium","expectedScore":45},
+  {"id":"partial-coverage","description":"Есть данные только по половине работы: общий риск не публикуется","values":{"root":[0.2,0.2]},"targets":[{"topicId":"root","weight":0.5},{"topicId":"other","weight":0.5}],"expectedLevel":"insufficient_data","expectedScore":null}
+]
