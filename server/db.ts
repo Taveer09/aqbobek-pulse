@@ -19,17 +19,33 @@ export interface SubscriptionRecord {
   endpoint: string;
   keys: { p256dh: string; auth: string };
 }
+const snapshotTables = {
+  state: ["id", "revision", "payload"],
+  credentials: ["user_id", "hash"],
+  sessions: ["hash", "user_id", "expires_at"],
+  subscriptions: ["endpoint", "user_id", "payload"],
+  config: ["key", "value"],
+  ai_cache: ["key", "payload"],
+} as const;
+export type StoreSnapshot = Record<
+  keyof typeof snapshotTables,
+  Record<string, string | number | null>[]
+>;
 export class Store {
   db: DatabaseSync;
   constructor(
     path = process.env.DATABASE_PATH || resolve("data/pulse.sqlite"),
+    initialize = true,
   ) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(
       `PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS credentials(user_id TEXT PRIMARY KEY,hash TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,expires_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS subscriptions(endpoint TEXT PRIMARY KEY,user_id TEXT NOT NULL,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS config(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS ai_cache(key TEXT PRIMARY KEY,payload TEXT NOT NULL);`,
     );
-    if (!this.db.prepare("SELECT id FROM state WHERE id=1").get()) {
+    if (
+      initialize &&
+      !this.db.prepare("SELECT id FROM state WHERE id=1").get()
+    ) {
       const s = seedState();
       this.db
         .prepare("INSERT INTO state VALUES(1,?,?)")
@@ -159,6 +175,37 @@ export class Store {
       .prepare("SELECT payload FROM ai_cache WHERE key=?")
       .get(key) as { payload: string } | undefined;
     return row ? (JSON.parse(row.payload) as AIResult) : undefined;
+  }
+  exportSnapshot(): StoreSnapshot {
+    const result = {} as StoreSnapshot;
+    for (const name of Object.keys(snapshotTables) as (keyof StoreSnapshot)[])
+      result[name] = this.db.prepare(`SELECT * FROM ${name}`).all() as Record<
+        string,
+        string | number | null
+      >[];
+    return result;
+  }
+  restoreSnapshot(snapshot: StoreSnapshot) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const name of Object.keys(
+        snapshotTables,
+      ) as (keyof StoreSnapshot)[]) {
+        if (!Array.isArray(snapshot[name])) throw new Error("Invalid snapshot");
+        this.db.exec(`DELETE FROM ${name}`);
+        const columns = snapshotTables[name];
+        const insert = this.db.prepare(
+          `INSERT INTO ${name} (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`,
+        );
+        for (const row of snapshot[name])
+          insert.run(...columns.map((column) => row[column]));
+      }
+      this.read();
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
   close() {
     this.db.close();

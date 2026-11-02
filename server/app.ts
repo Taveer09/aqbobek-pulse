@@ -46,7 +46,12 @@ export const solveInput = (s: SchoolState): SolveInput => ({
   maxNodes: 150000,
 });
 export async function buildApp(
-  options: { store?: Store; serveClient?: boolean; logger?: boolean } = {},
+  options: {
+    store?: Store;
+    serveClient?: boolean;
+    logger?: boolean;
+    backgroundNotifications?: boolean;
+  } = {},
 ) {
   const app = Fastify({ logger: options.logger ?? true, bodyLimit: 200000 });
   const store = options.store || new Store();
@@ -75,13 +80,24 @@ export async function buildApp(
     "http://localhost:5173",
     "http://127.0.0.1:5173",
   ];
+  const deploymentOrigins = [
+    process.env.VERCEL_URL,
+    process.env.VERCEL_BRANCH_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+  ]
+    .filter((host): host is string => !!host)
+    .map((host) => `https://${host}`);
   const origins = new Set(
     process.env.APP_ORIGIN
       ? [
+          ...deploymentOrigins,
           process.env.APP_ORIGIN,
           ...(process.env.NODE_ENV !== "production" ? localOrigins : []),
         ]
-      : localOrigins,
+      : [
+          ...deploymentOrigins,
+          ...(process.env.NODE_ENV !== "production" ? localOrigins : []),
+        ],
   );
   await app.register(cookie);
   app.addHook("onRequest", async (req) => {
@@ -98,40 +114,34 @@ export async function buildApp(
   });
   app.setErrorHandler((e, req, reply) => {
     if (e instanceof HttpError)
-      return reply
-        .code(e.status)
-        .send({
-          error: { code: e.code, message: e.message, details: e.details },
-        });
+      return reply.code(e.status).send({
+        error: { code: e.code, message: e.message, details: e.details },
+      });
     if (e instanceof ConflictError)
       return reply
         .code(409)
         .send({ error: { code: "REVISION_CONFLICT", message: e.message } });
     if (e instanceof ZodError)
-      return reply
-        .code(422)
-        .send({
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "Проверьте заполненные поля",
-            details: e.issues.map((i) => ({
-              path: i.path,
-              message: i.message,
-            })),
-          },
-        });
+      return reply.code(422).send({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Проверьте заполненные поля",
+          details: e.issues.map((i) => ({
+            path: i.path,
+            message: i.message,
+          })),
+        },
+      });
     req.log.error(
       { errorName: e instanceof Error ? e.name : "Error" },
       "Request failed",
     );
-    return reply
-      .code(500)
-      .send({
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "Не удалось выполнить действие. Попробуйте снова.",
-        },
-      });
+    return reply.code(500).send({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Не удалось выполнить действие. Попробуйте снова.",
+      },
+    });
   });
   const user = (req: { cookies: Record<string, string | undefined> }): User => {
     const u = store.user(req.cookies.pulse_session);
@@ -145,31 +155,37 @@ export async function buildApp(
   app.get("/api/health", () =>
     data({ ok: true, aiConfigured: aiConfigured(), pushConfigured: true }),
   );
-  const logins = new Map<string, { attempts: number; until: number }>();
   app.post("/api/auth/login", async (req, reply) => {
-    const ip = req.ip;
-    const bucket = logins.get(ip);
-    if (bucket && bucket.until > Date.now() && bucket.attempts >= 20)
-      throw new HttpError(429, "Слишком много попыток. Подождите минуту.");
     const input = loginInputSchema.parse(req.body);
-    const u = store
+    const account = store
       .read()
       .users.find((u) => u.email === input.email.toLowerCase());
+    const bucketKey = `login-limit:${account?.id || "unknown"}`;
+    const saved = store.config(bucketKey);
+    const bucket = saved
+      ? (JSON.parse(saved) as { attempts: number; until: number })
+      : undefined;
+    if (bucket && bucket.until > Date.now() && bucket.attempts >= 20)
+      throw new HttpError(429, "Слишком много попыток. Подождите минуту.");
+    const u = account;
     if (!u || !store.checkPassword(u.id, input.password)) {
       const current =
         bucket && bucket.until > Date.now()
           ? bucket
           : { attempts: 0, until: Date.now() + 60000 };
       current.attempts++;
-      logins.set(ip, current);
+      store.config(bucketKey, JSON.stringify(current));
       throw new HttpError(401, "Неверный логин или пароль", "INVALID_LOGIN");
     }
-    logins.delete(ip);
+    store.config(bucketKey, JSON.stringify({ attempts: 0, until: 0 }));
     const token = store.session(u.id);
     reply.setCookie("pulse_session", token, {
       httpOnly: true,
       sameSite: "strict",
-      secure: process.env.APP_ORIGIN?.startsWith("https:") || false,
+      secure:
+        process.env.VERCEL === "1" ||
+        process.env.APP_ORIGIN?.startsWith("https:") ||
+        false,
       path: "/",
       maxAge: 43200,
     });
@@ -358,7 +374,8 @@ export async function buildApp(
         current.scheduleStatus = "current";
         addScheduleNotifications(current, current.schedule);
       }, s.revision);
-      void flushNotifications(store);
+      if (options.backgroundNotifications !== false)
+        void flushNotifications(store);
     }
     return data(result);
   });
@@ -430,7 +447,8 @@ export async function buildApp(
         );
       }, saved.state.revision);
     }
-    void flushNotifications(store);
+    if (options.backgroundNotifications !== false)
+      void flushNotifications(store);
     return data({
       ...result,
       absenceSaved: true,
@@ -575,11 +593,9 @@ export async function buildApp(
       };
       app.get("/*", (req, reply) => {
         if (req.url.startsWith("/api/") || req.url.startsWith("/mock/"))
-          return reply
-            .code(404)
-            .send({
-              error: { code: "NOT_FOUND", message: "Маршрут не найден" },
-            });
+          return reply.code(404).send({
+            error: { code: "NOT_FOUND", message: "Маршрут не найден" },
+          });
         const pathname = decodeURIComponent(req.url.split("?")[0]);
         let file = resolve(root, "." + pathname);
         if (file !== root && !file.startsWith(root + sep))
@@ -588,11 +604,9 @@ export async function buildApp(
             .send({ error: { code: "FORBIDDEN", message: "Нет доступа" } });
         if (!existsSync(file) || !statSync(file).isFile()) {
           if (extname(pathname))
-            return reply
-              .code(404)
-              .send({
-                error: { code: "NOT_FOUND", message: "Файл не найден" },
-              });
+            return reply.code(404).send({
+              error: { code: "NOT_FOUND", message: "Файл не найден" },
+            });
           file = resolve(root, "index.html");
         }
         reply.header(
@@ -613,11 +627,9 @@ export async function buildApp(
       });
       app.all("/*", (req, reply) => {
         if (req.url.startsWith("/api/") || req.url.startsWith("/mock/"))
-          return reply
-            .code(404)
-            .send({
-              error: { code: "NOT_FOUND", message: "Маршрут не найден" },
-            });
+          return reply.code(404).send({
+            error: { code: "NOT_FOUND", message: "Маршрут не найден" },
+          });
         reply.hijack();
         vite.middlewares(req.raw, reply.raw, () => {
           reply.raw.writeHead(404);
@@ -627,12 +639,16 @@ export async function buildApp(
       app.addHook("onClose", () => vite.close());
     }
   }
-  const timer = setInterval(() => {
-    void flushNotifications(store);
-  }, 10000);
-  timer.unref();
+  const timer =
+    options.backgroundNotifications === false
+      ? undefined
+      : setInterval(() => {
+          if (options.backgroundNotifications !== false)
+            void flushNotifications(store);
+        }, 10000);
+  timer?.unref();
   app.addHook("onClose", async () => {
-    clearInterval(timer);
+    if (timer) clearInterval(timer);
     if (!options.store) store.close();
   });
   return app;

@@ -157,9 +157,11 @@ try {
     .getByRole("combobox")
     .first()
     .selectOption("t1");
+  const absenceResponse = admin.waitForResponse(r => r.url().endsWith("/api/schedule/absence") && r.request().method() === "POST");
   await admin
     .getByRole("button", { name: "Отметить болезнь", exact: true })
     .click();
+  assert.equal((await absenceResponse).status(), 200);
   await admin
     .getByText("Опубликована новая допустимая версия расписания.", {
       exact: true,

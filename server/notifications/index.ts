@@ -49,56 +49,83 @@ export function addScheduleNotifications(
     }
   }
 }
-let flushing = false;
-export async function flushNotifications(store: Store) {
-  if (flushing) return;
-  flushing = true;
-  try {
-    const pending = store
-      .read()
-      .notifications.filter(
-        (n) =>
-          n.delivery === "pending" ||
-          (n.delivery === "failed" && n.attempts < 2),
-      );
-    for (const n of pending) {
-      const subs = store.subscriptions(n.userId);
-      let sent = false;
-      for (const sub of subs)
-        try {
-          await webpush.sendNotification(
-            sub,
-            JSON.stringify({
-              id: n.id,
-              title: n.title,
-              body: n.body,
-              url: "/notifications",
-            }),
-            { TTL: 120, timeout: 5000 },
-          );
-          sent = true;
-        } catch (e) {
-          const status = (e as { statusCode?: number }).statusCode;
-          if (status === 404 || status === 410)
-            store.removeSubscription(sub.endpoint);
-        }
-      store.mutate(
-        (s) => {
-          const record = s.notifications.find((x) => x.id === n.id);
-          if (record) {
-            record.delivery = subs.length
-              ? sent
-                ? "sent"
-                : "failed"
-              : "not_subscribed";
-            record.attempts++;
-          }
-        },
-        undefined,
-        false,
-      );
+const activeFlushes = new WeakMap<Store, Promise<void>>();
+export function flushNotifications(
+  store: Store,
+  budgetMs = 20000,
+): Promise<void> {
+  const existing = activeFlushes.get(store);
+  if (existing) return existing;
+  const pending = sendPendingNotifications(store, budgetMs).finally(() =>
+    activeFlushes.delete(store),
+  );
+  activeFlushes.set(store, pending);
+  return pending;
+}
+async function sendPendingNotifications(store: Store, budgetMs: number) {
+  const deadline = Date.now() + budgetMs;
+  const pending = store
+    .read()
+    .notifications.filter(
+      (n) =>
+        n.delivery === "pending" || (n.delivery === "failed" && n.attempts < 2),
+    );
+  for (const n of pending) {
+    if (Date.now() >= deadline) break;
+    const subs = store.subscriptions(n.userId);
+    const progressKey = `push-progress:${n.id}`;
+    const saved = store.config(progressKey);
+    const progress: { endpoints: string[]; sent: boolean } = saved
+      ? JSON.parse(saved)
+      : { endpoints: [], sent: false };
+    let sent = progress.sent;
+    let complete = true;
+    for (const sub of subs) {
+      if (progress.endpoints.includes(sub.endpoint)) continue;
+      if (Date.now() >= deadline) {
+        complete = false;
+        break;
+      }
+      try {
+        await webpush.sendNotification(
+          sub,
+          JSON.stringify({
+            id: n.id,
+            title: n.title,
+            body: n.body,
+            url: "/notifications",
+          }),
+          {
+            TTL: 120,
+            timeout: Math.max(1, Math.min(5000, deadline - Date.now())),
+          },
+        );
+        sent = true;
+      } catch (e) {
+        const status = (e as { statusCode?: number }).statusCode;
+        if (status === 404 || status === 410)
+          store.removeSubscription(sub.endpoint);
+      }
+      progress.endpoints.push(sub.endpoint);
+      progress.sent = sent;
+      store.config(progressKey, JSON.stringify(progress));
     }
-  } finally {
-    flushing = false;
+    if (!complete) break;
+    store.config(progressKey, JSON.stringify({ endpoints: [], sent: false }));
+    store.mutate(
+      (s) => {
+        const record = s.notifications.find((x) => x.id === n.id);
+        if (record) {
+          record.delivery = subs.length
+            ? sent
+              ? "sent"
+              : "failed"
+            : "not_subscribed";
+          record.attempts++;
+        }
+      },
+      undefined,
+      false,
+    );
   }
 }

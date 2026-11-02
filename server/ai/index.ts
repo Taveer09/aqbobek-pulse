@@ -14,7 +14,6 @@ const output = z.object({
   factIds: z.array(z.string()).min(1),
   resourceIds: z.array(z.string()).max(3),
 });
-const usage = new Map<string, { calls: number; until: number }>();
 export const aiConfigured = () =>
   !!(process.env.GEMINI_API_KEY && process.env.GEMINI_MODEL);
 export async function generateAI(
@@ -134,14 +133,20 @@ export async function generateAI(
       "AI не подключён: настройте GEMINI_API_KEY и GEMINI_MODEL в локальном .env",
     );
   const now = Date.now();
-  for (const [id, bucket] of usage) if (bucket.until < now) usage.delete(id);
-  const bucket = usage.get(u.id) || { calls: 0, until: now + 3600000 };
+  const savedUsage = store.config(`ai-limit:${u.id}`);
+  const previous = savedUsage
+    ? (JSON.parse(savedUsage) as { calls: number; until: number })
+    : undefined;
+  const bucket =
+    previous && previous.until > now
+      ? previous
+      : { calls: 0, until: now + 3600000 };
   if (bucket.calls >= 30)
     return fallback(
       "Лимит AI-запросов для этой учётной записи временно исчерпан",
     );
   bucket.calls++;
-  usage.set(u.id, bucket);
+  store.config(`ai-limit:${u.id}`, JSON.stringify(bucket));
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const payload = {

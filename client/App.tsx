@@ -740,6 +740,7 @@ function Portal() {
   async function mutate(path: string, body: unknown, success: string) {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const result = await api<unknown>(path, body);
       const solve = result as Partial<SolveResult> | null;

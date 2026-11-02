@@ -30,3 +30,8 @@ docs/CHECKS.md
 docs/DESIGN.md
 docs/REVIEW.md
 docs/IMPLEMENTATION_REVIEW.md
+.vercel
+.env*
+
+# Hosting account and deployment-only credentials
+.vercel/
