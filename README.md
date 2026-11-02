@@ -8,10 +8,7 @@
 
 [Быстрый старт](#быстрый-старт) · [Демо за 2 минуты](docs/DEMO.md) · [Проверки](docs/VALIDATION.md) · [Ограничения](docs/LIMITATIONS.md)
 
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
-![React](https://img.shields.io/badge/React-20232A?style=flat-square&logo=react&logoColor=61DAFB)
-![Node.js 26+](https://img.shields.io/badge/Node.js-26%2B-43853D?style=flat-square&logo=nodedotjs&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)
+**TypeScript · React · Fastify · SQLite**
 
 </div>
 
