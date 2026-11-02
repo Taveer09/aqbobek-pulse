@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "smoke": "tsx scripts/smoke.ts",
-    "check": "npm run build && npm test"
+    "check": "npm run build && npm test",
+    "benchmark": "tsx scripts/benchmark.ts"
   },
   "dependencies": {
     "@fastify/cookie": "latest",
