@@ -30,7 +30,8 @@ async function login(name) {
 async function nav(page, name) {
   await page
     .getByRole("navigation")
-    .getByRole("button", { name, exact: true })
+    .getByRole("button")
+    .filter({ has: page.getByText(name, { exact: true }) })
     .click();
 }
 async function json(page, path, body) {
